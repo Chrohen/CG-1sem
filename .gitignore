@@ -1,0 +1,6 @@
+*/*.idea
+*/*.vs
+*/Lab3
+*/x64
+*/*.sln
+*/*.vcxproj
