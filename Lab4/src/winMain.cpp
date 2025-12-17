@@ -1,13 +1,10 @@
-#include <iostream>
-#include <thread>
-#include "Window.hpp"
+#include "Framework.hpp"
 
 int main() {
-	Window window(800, 600, L"CG Window");
+	Framework app(800, 600, L"CG Window");
 
-	while (window.ProcessMessages()) {
+	if (!app.Init())
+		return 0;
 
-	}
-
-	return 0;
+	return app.Run();
 }

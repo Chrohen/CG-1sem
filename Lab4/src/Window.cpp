@@ -1,8 +1,9 @@
 #include "Window.hpp"
 
-Window::Window(int width, int height, const wchar_t* title) {
+Window::Window(int width, int height, const wchar_t* title, IWindowMessageHandler* handler) : m_handler(handler) 
+{
 	WNDCLASS window_class = {};
-	window_class.hCursor = LoadCursor(0, IDC_ARROW);
+	window_class.hCursor = LoadCursor(nullptr, IDC_ARROW);
 	window_class.hInstance = GetModuleHandle(nullptr);
 	window_class.lpszClassName = L"WindowClass";
 	window_class.style = CS_HREDRAW | CS_VREDRAW;
@@ -55,22 +56,17 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 	Window* window = nullptr;
 
 	if (msg == WM_NCCREATE) {
-		CREATESTRUCT* cs = reinterpret_cast<CREATESTRUCT*>(lParam);
+		auto* cs = reinterpret_cast<CREATESTRUCT*>(lParam);
 		window = static_cast<Window*>(cs->lpCreateParams);
 		SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(window));
+
 		return DefWindowProc(hwnd, msg, wParam, lParam);
 	}
 
 	window = reinterpret_cast<Window*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
 
-	switch (msg) {
-	case WM_CLOSE:
-		DestroyWindow(hwnd);
-		return 0;
-	case WM_DESTROY:
-		PostQuitMessage(0);
-		return 0;
-	}
+	if (window && window->m_handler)
+		return window->m_handler->MsgProc(hwnd, msg, wParam, lParam);
 
 	return DefWindowProc(hwnd, msg, wParam, lParam);
 }
