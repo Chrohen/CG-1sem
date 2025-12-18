@@ -105,8 +105,9 @@
       <AdditionalIncludeDirectories>./include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <SubSystem>Console</SubSystem>
+      <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;dxguid.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -132,6 +133,7 @@
     <ClCompile Include="src\winMain.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="include\Dx12Common.hpp" />
     <ClInclude Include="include\Framework.hpp" />
     <ClInclude Include="include\Timer.hpp" />
     <ClInclude Include="include\Window.hpp" />

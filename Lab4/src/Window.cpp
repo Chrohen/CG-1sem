@@ -8,7 +8,6 @@ Window::Window(int width, int height, const wchar_t* title, IWindowMessageHandle
 	window_class.lpszClassName = L"WindowClass";
 	window_class.style = CS_HREDRAW | CS_VREDRAW;
 	window_class.lpfnWndProc = WndProc;
-	window_class.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
 
 	RegisterClass(&window_class);
 

@@ -20,7 +20,7 @@ double Timer::DeltaTime() const {
 
 void Timer::Reset() {
 	LARGE_INTEGER t;
-	QueryPerformanceFrequency(&t);
+	QueryPerformanceCounter(&t);
 
 	m_baseTime = t.QuadPart;
 	m_prevTime = t.QuadPart;
