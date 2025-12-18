@@ -5,6 +5,7 @@
 #include <Windows.h>
 #include <windowsx.h>
 #include "Window.hpp"
+#include "Timer.hpp"
 
 class Framework : public IWindowMessageHandler {
 public:
@@ -19,7 +20,7 @@ public:
 protected:
 	virtual void CreateRtvAndDsvDescriptorHeaps();
 	virtual void OnResize();
-	virtual void Update();
+	virtual void Update(const double& dt);
 	virtual void Draw();
 
 	virtual void OnMouseDown(WPARAM btnState, int x, int y);
@@ -29,6 +30,8 @@ protected:
 	HWND MainWnd() const { return m_window ? m_window->GetHWND() : nullptr; }
 	int ClientWidth() const { return m_clientWidth; }
 	int ClientHeight() const { return m_clientHeight; }
+
+	Timer m_timer;
 
 private:
 	int m_initWidth = 0;
@@ -44,8 +47,9 @@ private:
 	bool m_minimized = false;
 	bool m_maximized = false;
 	bool m_resizing = false;
+	
 
 	POINT m_lastMousePos = { 0,0 };
 };
 
-#endif FRAMEWORK_HPP
+#endif // FRAMEWORK_HPP

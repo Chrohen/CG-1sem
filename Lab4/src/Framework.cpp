@@ -19,9 +19,14 @@ bool Framework::Init() {
 }
 
 int Framework::Run() {
+	m_timer.Reset();
+
 	while (m_window->ProcessMessages()) {
+		m_timer.Tick();
+
 		if (!m_appPaused) {
-			Update();
+			const double dt = m_timer.DeltaTime();
+			Update(dt);
 			Draw();
 		}
 		else {
@@ -127,7 +132,7 @@ void Framework::OnResize()
 	
 }
 
-void Framework::Update()
+void Framework::Update(const double& dt)
 {
 	
 }
