@@ -135,8 +135,17 @@
   <ItemGroup>
     <ClInclude Include="include\Dx12Common.hpp" />
     <ClInclude Include="include\Framework.hpp" />
+    <ClInclude Include="include\RenderStructs.hpp" />
     <ClInclude Include="include\Timer.hpp" />
+    <ClInclude Include="include\UploadBuffer.hpp" />
     <ClInclude Include="include\Window.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shader\Phong.hlsl">
+      <DisableOptimizations Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</DisableOptimizations>
+      <EnableDebuggingInformation Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</EnableDebuggingInformation>
+      <FileType>Document</FileType>
+    </None>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

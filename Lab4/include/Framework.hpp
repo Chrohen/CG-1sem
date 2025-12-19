@@ -8,6 +8,8 @@
 #include "Window.hpp"
 #include "Timer.hpp"
 #include "Dx12Common.hpp"
+#include "UploadBuffer.hpp"
+#include "RenderStructs.hpp"
 
 class Framework : public IWindowMessageHandler {
 public:
@@ -88,6 +90,17 @@ private:
 	D3D12_VIEWPORT m_screenViewport = {};
 	D3D12_RECT m_scissorRect = {};
 
+	ComPtr<ID3DBlob> m_vsByteCode;
+	ComPtr<ID3DBlob> m_psByteCode;
+
+	std::unique_ptr<UploadBuffer<ObjectConstants>> m_objectCB;
+	std::unique_ptr<UploadBuffer<PassConstants>>   m_passCB;
+
+	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_cbvHeap;
+
+	ComPtr<ID3D12RootSignature> m_rootSignature;
+	ComPtr<ID3D12PipelineState> m_pso;
+
 	void InitDxgi();
 	void PickAdapter();
 	void LogAdapters();
@@ -97,6 +110,26 @@ private:
 	void CreateFence();
 	void FlushCommandQueue();
 	void CreateSwapChain();
+	void BuildShaders();
+	void BuildConstantBuffers();
+	void BuildCbvHeap();
+	void BuildCbvViews();
+	void BuildRootSignature();
+	void BuildPSO();
+
+
+	void BuildBoxGeometry();
+
+	ComPtr<ID3D12Resource> m_boxVB;
+	ComPtr<ID3D12Resource> m_boxIB;
+
+	ComPtr<ID3D12Resource> m_boxVBUpload;
+	ComPtr<ID3D12Resource> m_boxIBUpload;
+
+	D3D12_VERTEX_BUFFER_VIEW m_boxVBView = {};
+	D3D12_INDEX_BUFFER_VIEW  m_boxIBView = {};
+
+	UINT m_boxIndexCount = 0;
 
 	ID3D12Resource* CurrentBackBuffer() const {
 		return m_swapChainBuffer[m_currBackBuffer].Get();
