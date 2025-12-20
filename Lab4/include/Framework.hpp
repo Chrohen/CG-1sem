@@ -1,6 +1,7 @@
 #ifndef FRAMEWORK_HPP
 #define FRAMEWORK_HPP
 
+#include <array>
 #include <string>
 #include <memory>
 #include <Windows.h>
@@ -27,9 +28,9 @@ protected:
 	virtual void Update(const double& dt);
 	virtual void Draw();
 
-	virtual void OnMouseDown(WPARAM btnState, int x, int y);
-	virtual void OnMouseUp(WPARAM btnState, int x, int y);
-	virtual void OnMouseMove(WPARAM btnState, int x, int y);
+	virtual void OnMouseDown(HWND hwnd, WPARAM btnState, int x, int y);
+	virtual void OnMouseUp(HWND hwnd, WPARAM btnState, int x, int y);
+	virtual void OnMouseMove(HWND hwnd, WPARAM btnState, int x, int y);
 
 	HWND MainWnd() const { return m_window ? m_window->GetHWND() : nullptr; }
 	int ClientWidth() const { return m_clientWidth; }
@@ -116,7 +117,7 @@ private:
 	void BuildCbvViews();
 	void BuildRootSignature();
 	void BuildPSO();
-
+	void BuildObjVB_Upload();
 
 	void BuildBoxGeometry();
 
@@ -130,6 +131,34 @@ private:
 	D3D12_INDEX_BUFFER_VIEW  m_boxIBView = {};
 
 	UINT m_boxIndexCount = 0;
+	
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_modelVB;
+	D3D12_VERTEX_BUFFER_VIEW m_modelVBV{};
+	UINT m_modelVertexCount = 0;
+
+	DirectX::XMFLOAT3 m_modelCenter = { 0.0f, 0.0f, 0.0f };
+	float m_modelScale = 1.0f;
+	std::array<bool, 256> m_keyDown{}; // состояние VK_*
+
+	float m_cameraMoveSpeed = 3.0f;   // units/sec, подстрой под сцену
+
+	DirectX::XMFLOAT3 m_camPos = { 2.0f, 2.0f, -5.0f };
+	DirectX::XMFLOAT3 m_camTarget = { 0.0f, 0.0f,  0.0f };
+	DirectX::XMFLOAT3 m_camUp = { 0.0f, 1.0f,  0.0f };
+
+	// --- Mouse look state ---
+	bool  m_rmbDown = false;
+
+	// углы камеры
+	float m_yaw = 0.0f;   // поворот вокруг Y
+	float m_pitch = 0.0f;   // наклон вверх/вниз
+
+	// чувствительность мыши
+	float m_mouseSensitivity = 0.0025f; // радиан на пиксель (подстрой)
+
+	// дистанция до target (если хочешь "orbital"), для FPS не нужна
+	// float m_camDistance = 5.0f;
+
 
 	ID3D12Resource* CurrentBackBuffer() const {
 		return m_swapChainBuffer[m_currBackBuffer].Get();

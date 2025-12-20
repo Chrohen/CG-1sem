@@ -3,6 +3,17 @@
 #include <DirectXMath.h>
 #include <array>
 #include <cstdint>
+#include <unordered_map>
+#include <cmath>
+#include <string>
+
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "tiny_obj_loader.h"
+
+#include <filesystem>
+#include <vector>
+#include <algorithm>
+#include <cfloat>
 
 #if defined(_DEBUG)
 #include <d3d12sdklayers.h>
@@ -46,6 +57,7 @@ bool Framework::Init() {
 	BuildRootSignature();
 	BuildPSO();
 	BuildBoxGeometry();
+	BuildObjVB_Upload();
 
 	OnResize();
 
@@ -150,20 +162,43 @@ LRESULT Framework::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	case WM_LBUTTONDOWN:
 	case WM_MBUTTONDOWN:
 	case WM_RBUTTONDOWN:
-		OnMouseDown(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		OnMouseDown(hwnd, wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		return 0;
 
 	case WM_LBUTTONUP:
 	case WM_MBUTTONUP:
 	case WM_RBUTTONUP:
-		OnMouseUp(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		OnMouseUp(hwnd, wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		return 0;
 
 	case WM_MOUSEMOVE:
-		OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		OnMouseMove(hwnd, wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		return 0;
+
+	case WM_KEYDOWN:
+	case WM_SYSKEYDOWN:
+	{
+		const uint8_t vk = static_cast<uint8_t>(wParam);
+		m_keyDown[vk] = true;
 		return 0;
 	}
 
+	case WM_KEYUP:
+	case WM_SYSKEYUP:
+	{
+		const uint8_t vk = static_cast<uint8_t>(wParam);
+		m_keyDown[vk] = false;
+		return 0;
+	}
+
+	// чтобы при потере фокуса не было "залипших" клавиш
+	case WM_KILLFOCUS:
+	{
+		m_keyDown.fill(false);
+		return 0;
+	}
+
+	}
 	return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
@@ -278,7 +313,9 @@ void Framework::OnResize()
 void Framework::Update(const double& dt)
 {
 	ObjectConstants obj = {};
-	XMMATRIX world = XMMatrixIdentity();
+	XMMATRIX world =
+		XMMatrixTranslation(-m_modelCenter.x, -m_modelCenter.y, -m_modelCenter.z) *
+		XMMatrixScaling(m_modelScale, m_modelScale, m_modelScale);
 	XMMATRIX worldInvTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
 
 	XMStoreFloat4x4(&obj.World, XMMatrixTranspose(world));
@@ -286,22 +323,49 @@ void Framework::Update(const double& dt)
 
 	m_objectCB->CopyData(0, obj);
 
-	PassConstants pass = {};
-	float aspect = static_cast<float>(m_clientWidth) / static_cast<float>(m_clientHeight);
+	XMVECTOR pos = XMLoadFloat3(&m_camPos);
+	XMVECTOR target = XMLoadFloat3(&m_camTarget);
+	XMVECTOR up = XMVector3Normalize(XMLoadFloat3(&m_camUp));
 
-	XMVECTOR eye = XMVectorSet(2.0f, 2.0f, -5.0f, 1.0f);
-	XMVECTOR target = XMVectorZero();
-	XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	XMVECTOR forward = XMVector3Normalize(target - pos);
+	XMVECTOR right = XMVector3Normalize(XMVector3Cross(up, forward));
 
-	XMMATRIX view = XMMatrixLookAtLH(eye, target, up);
-	XMMATRIX proj = XMMatrixPerspectiveFovLH(0.25f * XM_PI, aspect, 1.0f, 1000.0f);
+	float speed = m_cameraMoveSpeed;
+	if (m_keyDown[VK_SHIFT]) speed *= 3.0f; 
+
+	float step = speed * static_cast<float>(dt);
+	XMVECTOR move = XMVectorZero();
+
+	if (m_keyDown['W']) move += forward;
+	if (m_keyDown['S']) move -= forward;
+	if (m_keyDown['D']) move += right;
+	if (m_keyDown['A']) move -= right;
+
+	if (m_keyDown[VK_SPACE])   move += up;
+	if (m_keyDown[VK_CONTROL]) move -= up;
+
+	if (!XMVector3Equal(move, XMVectorZero()))
+		move = XMVector3Normalize(move) * step;
+
+	pos += move;
+	target += move;
+
+	XMStoreFloat3(&m_camPos, pos);
+	XMStoreFloat3(&m_camTarget, target);
+
+	XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
+
+	float aspect = (float)m_clientWidth / (float)m_clientHeight;
+	XMMATRIX proj = XMMatrixPerspectiveFovLH(0.25f * XM_PI, aspect, 0.1f, 1000.0f);
+
 	XMMATRIX viewProj = view * proj;
 
+	PassConstants pass{};
 	XMStoreFloat4x4(&pass.ViewProj, XMMatrixTranspose(viewProj));
-	pass.EyePosW = { 0.0f, 0.0f, -5.0f };
+
+	XMStoreFloat3(&pass.EyePosW, pos);
 
 	pass.LightDirW = { 0.577f, -0.3f, 0.577f };
-
 	pass.Ambient = { 0.2f, 0.2f, 0.2f, 1.0f };
 	pass.Diffuse = { 1.0f, 1.0f, 1.0f, 1.0f };
 	pass.Specular = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -350,11 +414,20 @@ void Framework::Draw()
 		nullptr
 	);
 
-	m_commandList->IASetVertexBuffers(0, 1, &m_boxVBView);
-	m_commandList->IASetIndexBuffer(&m_boxIBView);
 	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	m_commandList->DrawIndexedInstanced(m_boxIndexCount, 1, 0, 0, 0);
+	if (m_modelVB && m_modelVertexCount > 0)
+	{
+		m_commandList->IASetVertexBuffers(0, 1, &m_modelVBV);
+		m_commandList->DrawInstanced(m_modelVertexCount, 1, 0, 0);
+	}
+	else
+	{
+		// fallback: куб (если OBJ не загрузился)
+		m_commandList->IASetVertexBuffers(0, 1, &m_boxVBView);
+		m_commandList->IASetIndexBuffer(&m_boxIBView);
+		m_commandList->DrawIndexedInstanced(m_boxIndexCount, 1, 0, 0, 0);
+	}
 
 	D3D12_RESOURCE_BARRIER toPresent{};
 	toPresent.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -375,24 +448,6 @@ void Framework::Draw()
 	FlushCommandQueue();
 }
 
-void Framework::OnMouseDown(WPARAM btnState, int x, int y)
-{
-	m_lastMousePos.x = x;
-	m_lastMousePos.y = y;
-	SetCapture(MainWnd());
-}
-
-void Framework::OnMouseUp(WPARAM btnState, int x, int y)
-{
-	ReleaseCapture();
-}
-
-
-void Framework::OnMouseMove(WPARAM btnState, int x, int y)
-{
-	m_lastMousePos.x = x;
-	m_lastMousePos.y = y;
-}
 
 void Framework::InitDxgi() {
 	UINT factoryFlags = 0;
@@ -957,4 +1012,381 @@ void Framework::BuildBoxGeometry()
 
 	m_boxVBUpload.Reset();
 	m_boxIBUpload.Reset();
+}
+
+static void LoadObjAsTriangleList(
+	const std::wstring& objPathW,
+	std::vector<Vertex>& outVertices)
+{
+	using namespace DirectX;
+
+	std::string objPath(objPathW.begin(), objPathW.end());
+
+	tinyobj::attrib_t attrib;
+	std::vector<tinyobj::shape_t> shapes;
+	std::vector<tinyobj::material_t> materials;
+	std::string warn, err;
+
+	std::filesystem::path p(objPath);
+	std::string baseDir = p.parent_path().string();
+	if (!baseDir.empty() && baseDir.back() != '/' && baseDir.back() != '\\')
+		baseDir += "/";
+
+	bool ok = tinyobj::LoadObj(
+		&attrib, &shapes, &materials,
+		&warn, &err,
+		objPath.c_str(), baseDir.c_str(),
+		true);
+
+	if (!warn.empty())
+		OutputDebugStringA((std::string("tinyobj warn: ") + warn + "\n").c_str());
+
+	if (!ok)
+		throw std::runtime_error("tinyobj error: " + err);
+
+	outVertices.clear();
+
+	const bool hasNormals = !attrib.normals.empty();
+
+	for (const auto& shape : shapes)
+	{
+		size_t indexOffset = 0;
+
+		for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++)
+		{
+			int fv = shape.mesh.num_face_vertices[f];
+			if (fv != 3) { indexOffset += fv; continue; }
+
+			Vertex tri[3]{};
+
+			for (int v = 0; v < 3; v++)
+			{
+				tinyobj::index_t idx = shape.mesh.indices[indexOffset + v];
+
+				tri[v].Pos = {
+					attrib.vertices[3 * idx.vertex_index + 0],
+					attrib.vertices[3 * idx.vertex_index + 1],
+					attrib.vertices[3 * idx.vertex_index + 2]
+				};
+
+				if (hasNormals && idx.normal_index >= 0)
+				{
+					tri[v].Normal = {
+						attrib.normals[3 * idx.normal_index + 0],
+						attrib.normals[3 * idx.normal_index + 1],
+						attrib.normals[3 * idx.normal_index + 2]
+					};
+				}
+				else
+				{
+					tri[v].Normal = { 0,0,0 };
+				}
+			}
+
+			if (!hasNormals)
+			{
+				XMVECTOR A = XMLoadFloat3(&tri[0].Pos);
+				XMVECTOR B = XMLoadFloat3(&tri[1].Pos);
+				XMVECTOR C = XMLoadFloat3(&tri[2].Pos);
+
+				XMVECTOR N = XMVector3Normalize(XMVector3Cross(B - A, C - A));
+				XMFLOAT3 n;
+				XMStoreFloat3(&n, N);
+
+				tri[0].Normal = n;
+				tri[1].Normal = n;
+				tri[2].Normal = n;
+			}
+
+			outVertices.push_back(tri[0]);
+			outVertices.push_back(tri[1]);
+			outVertices.push_back(tri[2]);
+
+			indexOffset += 3;
+		}
+	}
+}
+
+void Framework::BuildObjVB_Upload()
+{
+	using namespace DirectX;
+
+	// ---------- 0) Путь к OBJ ----------
+	const std::wstring objPathW = L"assets\\sponza.obj";
+
+	auto WideToUtf8 = [](const std::wstring& w) -> std::string
+		{
+			if (w.empty()) return {};
+			int size = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
+			std::string s((size > 0) ? (size - 1) : 0, '\0');
+			if (size > 1)
+				WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, s.data(), size, nullptr, nullptr);
+			return s;
+		};
+
+	std::string objPath = WideToUtf8(objPathW);
+
+	// baseDir нужен, чтобы подхватились .mtl и текстуры (если будут)
+	std::string baseDir;
+	{
+		std::wstring dirW = objPathW;
+		size_t pos = dirW.find_last_of(L"\\/");
+
+		if (pos != std::wstring::npos)
+			dirW = dirW.substr(0, pos + 1);
+		else
+			dirW = L"";
+
+		baseDir = WideToUtf8(dirW);
+	}
+
+	// ---------- 1) tinyobj LoadObj ----------
+	tinyobj::attrib_t attrib;
+	std::vector<tinyobj::shape_t> shapes;
+	std::vector<tinyobj::material_t> materials;
+	std::string warn, err;
+
+	bool ok = tinyobj::LoadObj(
+		&attrib, &shapes, &materials,
+		&warn, &err,
+		objPath.c_str(),
+		baseDir.empty() ? nullptr : baseDir.c_str(),
+		/*triangulate*/ true);
+
+	if (!warn.empty())
+		OutputDebugStringA(("[tinyobj warn] " + warn + "\n").c_str());
+	if (!err.empty())
+		OutputDebugStringA(("[tinyobj err ] " + err + "\n").c_str());
+
+	if (!ok)
+		throw std::runtime_error("tinyobj::LoadObj failed (see Output window).");
+
+	// ---------- 2) Разворачиваем в triangle list Vertex[] ----------
+	std::vector<Vertex> vertices;
+	vertices.reserve(500000);
+
+	const bool hasNormals = !attrib.normals.empty();
+
+	// bounds (без std::min/std::max)
+	XMFLOAT3 minP = { +FLT_MAX, +FLT_MAX, +FLT_MAX };
+	XMFLOAT3 maxP = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+
+	auto ExpandBounds = [&](const XMFLOAT3& p)
+		{
+			if (p.x < minP.x) minP.x = p.x;
+			if (p.y < minP.y) minP.y = p.y;
+			if (p.z < minP.z) minP.z = p.z;
+
+			if (p.x > maxP.x) maxP.x = p.x;
+			if (p.y > maxP.y) maxP.y = p.y;
+			if (p.z > maxP.z) maxP.z = p.z;
+		};
+
+	auto ReadPos = [&](int vIdx) -> XMFLOAT3
+		{
+			XMFLOAT3 p = { 0,0,0 };
+			if (vIdx >= 0)
+			{
+				p.x = attrib.vertices[3 * (size_t)vIdx + 0];
+				p.y = attrib.vertices[3 * (size_t)vIdx + 1];
+				p.z = attrib.vertices[3 * (size_t)vIdx + 2];
+			}
+			return p;
+		};
+
+	auto ReadNrm = [&](int nIdx) -> XMFLOAT3
+		{
+			XMFLOAT3 n = { 0,1,0 };
+			if (hasNormals && nIdx >= 0)
+			{
+				n.x = attrib.normals[3 * (size_t)nIdx + 0];
+				n.y = attrib.normals[3 * (size_t)nIdx + 1];
+				n.z = attrib.normals[3 * (size_t)nIdx + 2];
+			}
+			return n;
+		};
+
+	for (const auto& sh : shapes)
+	{
+		size_t indexOffset = 0;
+
+		for (size_t f = 0; f < sh.mesh.num_face_vertices.size(); f++)
+		{
+			int fv = sh.mesh.num_face_vertices[f];
+			if (fv != 3)
+			{
+				indexOffset += (size_t)fv;
+				continue;
+			}
+
+			tinyobj::index_t i0 = sh.mesh.indices[indexOffset + 0];
+			tinyobj::index_t i1 = sh.mesh.indices[indexOffset + 1];
+			tinyobj::index_t i2 = sh.mesh.indices[indexOffset + 2];
+
+			XMFLOAT3 p0 = ReadPos(i0.vertex_index);
+			XMFLOAT3 p1 = ReadPos(i1.vertex_index);
+			XMFLOAT3 p2 = ReadPos(i2.vertex_index);
+
+			XMFLOAT3 n0 = ReadNrm(i0.normal_index);
+			XMFLOAT3 n1 = ReadNrm(i1.normal_index);
+			XMFLOAT3 n2 = ReadNrm(i2.normal_index);
+
+			// Если нормалей нет — считаем face normal
+			if (!hasNormals || i0.normal_index < 0 || i1.normal_index < 0 || i2.normal_index < 0)
+			{
+				XMVECTOR A = XMLoadFloat3(&p0);
+				XMVECTOR B = XMLoadFloat3(&p1);
+				XMVECTOR C = XMLoadFloat3(&p2);
+				XMVECTOR fn = XMVector3Normalize(XMVector3Cross(B - A, C - A));
+				XMStoreFloat3(&n0, fn);
+				n1 = n0;
+				n2 = n0;
+			}
+
+			// ВАЖНО: этот конструктор должен соответствовать твоему Vertex.
+			// Если у тебя Vertex без Color — убери третий параметр.
+			vertices.push_back(Vertex{ p0, n0, XMFLOAT4(1,1,1,1) });
+			vertices.push_back(Vertex{ p1, n1, XMFLOAT4(1,1,1,1) });
+			vertices.push_back(Vertex{ p2, n2, XMFLOAT4(1,1,1,1) });
+
+			ExpandBounds(p0);
+			ExpandBounds(p1);
+			ExpandBounds(p2);
+
+			indexOffset += 3;
+		}
+	}
+
+	if (vertices.empty())
+		throw std::runtime_error("OBJ loaded but produced 0 vertices.");
+
+	// ---------- 3) Центр + масштаб (чтобы Sponza точно попала в кадр) ----------
+	m_modelCenter =
+	{
+		0.5f * (minP.x + maxP.x),
+		0.5f * (minP.y + maxP.y),
+		0.5f * (minP.z + maxP.z)
+	};
+
+	float dx = (maxP.x - minP.x);
+	float dy = (maxP.y - minP.y);
+	float dz = (maxP.z - minP.z);
+
+	float maxDim = dx;
+	if (dy > maxDim) maxDim = dy;
+	if (dz > maxDim) maxDim = dz;
+
+	// Хотим, чтобы модель стала примерно "размером 2" (под твою камеру/near/far)
+	m_modelScale = (maxDim > 1e-6f) ? (2.0f / maxDim) : 1.0f;
+
+	// ---------- 4) Создаём VertexBuffer в UPLOAD heap (самый простой вариант) ----------
+	m_modelVertexCount = (UINT)vertices.size();
+	const UINT vbByteSize = (UINT)(vertices.size() * sizeof(Vertex));
+
+	D3D12_RESOURCE_DESC vbDesc{};
+	vbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	vbDesc.Width = vbByteSize;
+	vbDesc.Height = 1;
+	vbDesc.DepthOrArraySize = 1;
+	vbDesc.MipLevels = 1;
+	vbDesc.Format = DXGI_FORMAT_UNKNOWN;
+	vbDesc.SampleDesc.Count = 1;
+	vbDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+	D3D12_HEAP_PROPERTIES heapProps{};
+	heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+	ThrowIfFailed(m_device->CreateCommittedResource(
+		&heapProps,
+		D3D12_HEAP_FLAG_NONE,
+		&vbDesc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(m_modelVB.GetAddressOf())
+	));
+
+	void* mapped = nullptr;
+	ThrowIfFailed(m_modelVB->Map(0, nullptr, &mapped));
+	memcpy(mapped, vertices.data(), vbByteSize);
+	m_modelVB->Unmap(0, nullptr);
+
+	m_modelVBV.BufferLocation = m_modelVB->GetGPUVirtualAddress();
+	m_modelVBV.StrideInBytes = sizeof(Vertex);
+	m_modelVBV.SizeInBytes = vbByteSize;
+}
+
+void Framework::OnMouseDown(HWND hwnd, WPARAM btnState, int x, int y)
+{
+	if (btnState & MK_RBUTTON)
+	{
+		m_rmbDown = true;
+		m_lastMousePos.x = x;
+		m_lastMousePos.y = y;
+
+		// Захват мыши, чтобы события шли даже если вышли за окно
+		SetCapture(hwnd);
+
+		// Опционально: скрыть курсор
+		// ShowCursor(FALSE);
+	}
+}
+
+void Framework::OnMouseUp(HWND hwnd, WPARAM btnState, int x, int y)
+{
+	(void)btnState; (void)x; (void)y;
+
+	if (m_rmbDown)
+	{
+		m_rmbDown = false;
+		ReleaseCapture();
+
+		// Опционально вернуть курсор
+		// ShowCursor(TRUE);
+	}
+}
+
+void Framework::OnMouseMove(HWND hwnd,	WPARAM btnState, int x, int y)
+{
+	(void)btnState;
+
+	if (!m_rmbDown)
+	{
+		m_lastMousePos.x = x;
+		m_lastMousePos.y = y;
+		return;
+	}
+
+	int dx = x - m_lastMousePos.x;
+	int dy = y - m_lastMousePos.y;
+
+	m_lastMousePos.x = x;
+	m_lastMousePos.y = y;
+
+	// yaw: вправо -> положительный
+	m_yaw += dx * m_mouseSensitivity;
+
+	// pitch: вверх обычно уменьшает y (dy отрицательный),
+	// поэтому делаем "-" чтобы вверх => положительный pitch
+	m_pitch -= dy * m_mouseSensitivity;
+
+	// Ограничим pitch, чтобы не переворачивалась камера
+	const float limit = DirectX::XM_PIDIV2 - 0.1f; // ~ 89°
+	if (m_pitch > limit) m_pitch = limit;
+	if (m_pitch < -limit) m_pitch = -limit;
+
+	using namespace DirectX;
+
+	// Вектор "вперёд" из yaw/pitch (LH система)
+	XMVECTOR forward = XMVectorSet(
+		cosf(m_pitch) * sinf(m_yaw),
+		sinf(m_pitch),
+		cosf(m_pitch) * cosf(m_yaw),
+		0.0f);
+
+	forward = XMVector3Normalize(forward);
+
+	XMVECTOR pos = XMLoadFloat3(&m_camPos);
+	XMVECTOR tgt = pos + forward;
+
+	XMStoreFloat3(&m_camTarget, tgt);
 }
